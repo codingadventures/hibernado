@@ -3,7 +3,7 @@ import {
   PanelSection,
   PanelSectionRow,
   staticClasses,
-  Field,
+  // Field,
   ToggleField,
   // Dropdown,
   // SingleDropdownOption,
@@ -121,16 +121,7 @@ function Content() {
     showModal(
       <ConfirmModal
         strTitle="Hibernate Now"
-        strDescription={
-          "Hibernation will save your current state to disk and fully power off your device. " +
-          "When you turn it back on, everything will be restored exactly as you left it.\n\n" +
-          "What to expect:\n" +
-          "• There may be a short delay before the screen turns off\n" +
-          "• You may hear looping sound effects during this time\n" +
-          "• After the screen turns off, it may briefly turn back on for up to 20 seconds before fully shutting down\n" +
-          "• The fan will stop spinning when the device is fully off\n\n" +
-          "To wake from hibernation, hold the power button slightly longer than usual (it's a cold boot)."
-        }
+        strDescription="Hibernation saves your current state to disk and powers off. When you turn it back on, everything restores exactly as you left it. The screen may flicker and fans may run for up to 20 seconds before fully powering off. To wake, hold the power button slightly longer than usual."
         strOKButtonText="Hibernate Now"
         strCancelButtonText="Cancel"
         onOK={handleHibernate}
@@ -260,55 +251,10 @@ function Content() {
   };
   */
 
-  const getStatusColor = () => {
-    if (!status) return "#888";
-    if (status.ready) return "#4CAF50";
-    if (status.swapfile_exists || status.swap_active) return "#FF9800";
-    return "#F44336";
-  };
-
-  const getStatusText = () => {
-    if (!status) return "Checking...";
-    if (status.message) return status.message;
-    if (status.ready) return "Ready for hibernation";
-    return "Not configured";
-  };
-
   return (
     <PanelSection>
-      <PanelSectionRow>
-        <Field
-          label="Status"
-          description={getStatusText()}
-        >
-          <div style={{
-            width: "12px",
-            height: "12px",
-            borderRadius: "50%",
-            backgroundColor: getStatusColor(),
-            marginRight: "8px"
-          }} />
-        </Field>
-      </PanelSectionRow>
-
       {status?.ready && (
         <>
-          <PanelSectionRow>
-            <div
-              style={{
-                fontSize: "14px",
-                fontWeight: "bold",
-                marginTop: "8px",
-                marginBottom: "6px",
-                borderBottom: "1px solid rgba(255, 255, 255, 0.2)",
-                paddingBottom: "3px",
-                color: "white"
-              }}
-            >
-              Manual Buttons
-            </div>
-          </PanelSectionRow>
-          
           <PanelSectionRow>
             <ButtonItem
               layout="below"
@@ -330,22 +276,6 @@ function Content() {
             </ButtonItem>
           </PanelSectionRow>
           */}
-
-          <PanelSectionRow>
-            <div
-              style={{
-                fontSize: "14px",
-                fontWeight: "bold",
-                marginTop: "8px",
-                marginBottom: "6px",
-                borderBottom: "1px solid rgba(255, 255, 255, 0.2)",
-                paddingBottom: "3px",
-                color: "white"
-              }}
-            >
-              Power Button
-            </div>
-          </PanelSectionRow>
 
           <PanelSectionRow>
             <ToggleField
