@@ -20,3 +20,6 @@ watch:
 
 ssh:
     ssh deck@192.168.0.6
+
+send:
+    scp out/Hibernado.zip deck@192.168.0.6:~ && clear && ssh deck@192.168.0.6 'journalctl --follow'

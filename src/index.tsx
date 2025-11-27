@@ -5,13 +5,14 @@ import {
   staticClasses,
   Field,
   ToggleField,
-  Dropdown,
-  SingleDropdownOption
+  // Dropdown,
+  // SingleDropdownOption,
+  ConfirmModal,
+  showModal
 } from "@decky/ui";
 import {
   callable,
   definePlugin,
-  toaster,
 } from "@decky/api"
 import { useState, useEffect } from "react";
 import { FaTornado } from "react-icons/fa6";
@@ -19,18 +20,19 @@ import { FaTornado } from "react-icons/fa6";
 const checkHibernateStatus = callable<[], any>("check_hibernate_status");
 const prepareHibernate = callable<[], any>("prepare_hibernate");
 const hibernateNow = callable<[], any>("hibernate_now");
-const suspendThenHibernate = callable<[], any>("suspend_then_hibernate");
+// const suspendThenHibernate = callable<[], any>("suspend_then_hibernate");
 const cleanupHibernate = callable<[], any>("cleanup_hibernate");
 const setPowerButtonOverride = callable<[boolean, string], any>("set_power_button_override");
-const getHibernateDelay = callable<[], any>("get_hibernate_delay");
-const setHibernateDelay = callable<[number], any>("set_hibernate_delay");
+// const getHibernateDelay = callable<[], any>("get_hibernate_delay");
+// const setHibernateDelay = callable<[number], any>("set_hibernate_delay");
 
 function Content() {
   const [status, setStatus] = useState<any>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSettingUp, setIsSettingUp] = useState(false);
   const [powerButtonOverride, setPowerButtonOverrideState] = useState(false);
-  const [overrideMode, setOverrideMode] = useState<"hibernate" | "suspend-then-hibernate">("hibernate");
-  const [hibernateDelayMinutes, setHibernateDelayMinutes] = useState<number>(60);
+  // const [overrideMode, setOverrideMode] = useState<"hibernate" | "suspend-then-hibernate">("hibernate");
+  // const [hibernateDelayMinutes, setHibernateDelayMinutes] = useState<number>(60);
 
   useEffect(() => {
     loadStatus();
@@ -56,54 +58,44 @@ function Content() {
       if (result.power_button_override !== undefined) {
         setPowerButtonOverrideState(result.power_button_override);
       }
-      if (result.override_mode) {
-        setOverrideMode(result.override_mode);
+      // if (result.override_mode) {
+      //   setOverrideMode(result.override_mode);
+      // }
+      
+      // If setup is in progress and we're now ready, clear the setting up state
+      if (isSettingUp && result.ready) {
+        setIsSettingUp(false);
       }
       
-      // Load hibernate delay setting
-      if (result.ready) {
-        const delayResult = await getHibernateDelay();
-        if (delayResult.success && delayResult.delay_minutes) {
-          setHibernateDelayMinutes(delayResult.delay_minutes);
-        }
-      }
+      // Load hibernate delay setting - commented out for now
+      // if (result.ready) {
+      //   const delayResult = await getHibernateDelay();
+      //   if (delayResult.success && delayResult.delay_minutes) {
+      //     setHibernateDelayMinutes(delayResult.delay_minutes);
+      //   }
+      // }
     } catch (error) {
       console.error("Failed to check hibernate status:", error);
-      toaster.toast({
-        title: "Status Check Failed",
-        body: String(error)
-      });
     }
   };
 
   const handlePrepare = async () => {
     setIsLoading(true);
-    toaster.toast({
-      title: "Setting Up Hibernation",
-      body: "This may take a few minutes. Creating swapfile and configuring system..."
-    });
+    setIsSettingUp(true);
     
     try {
       const result = await prepareHibernate();
       
       if (result.success) {
-        toaster.toast({
-          title: "Setup Complete",
-          body: "Hibernation configured successfully! All changes applied and active."
-        });
         await loadStatus();
+        // Keep isSettingUp true until loadStatus confirms ready
       } else {
-        toaster.toast({
-          title: "Setup Failed",
-          body: result.error || "Unknown error occurred"
-        });
+        console.error("Setup failed:", result.error);
+        setIsSettingUp(false);
       }
     } catch (error) {
       console.error("Prepare failed:", error);
-      toaster.toast({
-        title: "Setup Error",
-        body: String(error)
-      });
+      setIsSettingUp(false);
     } finally {
       setIsLoading(false);
     }
@@ -111,123 +103,114 @@ function Content() {
 
   const handleHibernate = async () => {
     setIsLoading(true);
-    toaster.toast({
-      title: "Hibernating",
-      body: "System will hibernate in a moment..."
-    });
     
     try {
       const result = await hibernateNow();
       
       if (!result.success) {
-        toaster.toast({
-          title: "Hibernation Failed",
-          body: result.error || "Unknown error occurred"
-        });
+        console.error("Hibernation failed:", result.error);
         setIsLoading(false);
       }
     } catch (error) {
       console.error("Hibernate failed:", error);
-      toaster.toast({
-        title: "Hibernation Error",
-        body: String(error)
-      });
       setIsLoading(false);
     }
   };
 
+  const showHibernateConfirmation = () => {
+    showModal(
+      <ConfirmModal
+        strTitle="Hibernate Now"
+        strDescription={
+          "Hibernation will save your current state to disk and fully power off your device. " +
+          "When you turn it back on, everything will be restored exactly as you left it.\n\n" +
+          "What to expect:\n" +
+          "• There may be a short delay before the screen turns off\n" +
+          "• You may hear looping sound effects during this time\n" +
+          "• After the screen turns off, it may briefly turn back on for up to 20 seconds before fully shutting down\n" +
+          "• The fan will stop spinning when the device is fully off\n\n" +
+          "To wake from hibernation, hold the power button slightly longer than usual (it's a cold boot)."
+        }
+        strOKButtonText="Hibernate Now"
+        strCancelButtonText="Cancel"
+        onOK={handleHibernate}
+      />
+    );
+  };
+
+  /* Suspend-then-hibernate functionality - hidden for now
   const handleSuspendThenHibernate = async () => {
     setIsLoading(true);
-    toaster.toast({
-      title: "Suspend-then-Hibernate",
-      body: `System will suspend now, then hibernate after ${formatDelayLabel(hibernateDelayMinutes)} of inactivity`
-    });
     
     try {
       const result = await suspendThenHibernate();
       
       if (!result.success) {
-        toaster.toast({
-          title: "Suspend-then-Hibernate Failed",
-          body: result.error || "Unknown error occurred"
-        });
+        console.error("Suspend-then-hibernate failed:", result.error);
         setIsLoading(false);
       }
     } catch (error) {
       console.error("Suspend-then-hibernate failed:", error);
-      toaster.toast({
-        title: "Suspend-then-Hibernate Error",
-        body: String(error)
-      });
       setIsLoading(false);
     }
   };
+  */
 
   const handleCleanup = async () => {
     setIsLoading(true);
-    toaster.toast({
-      title: "Removing Hibernation",
-      body: "Cleaning up all hibernation configuration..."
-    });
     
     try {
       const result = await cleanupHibernate();
       
       if (result.success) {
-        toaster.toast({
-          title: "Cleanup Complete",
-          body: "All hibernation configuration removed. A reboot is recommended."
-        });
         await loadStatus();
       } else {
-        toaster.toast({
-          title: "Cleanup Failed",
-          body: result.error || "Unknown error occurred"
-        });
+        console.error("Cleanup failed:", result.error);
       }
     } catch (error) {
       console.error("Cleanup failed:", error);
-      toaster.toast({
-        title: "Cleanup Error",
-        body: String(error)
-      });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const showCleanupConfirmation = () => {
+    showModal(
+      <ConfirmModal
+        strTitle="Remove Hibernation"
+        strDescription={
+          "This will remove all hibernation configuration including the swapfile. " +
+          "A reboot is recommended after removal.\n\n" +
+          "Are you sure you want to remove hibernation setup?"
+        }
+        strOKButtonText="Remove"
+        strCancelButtonText="Cancel"
+        onOK={handleCleanup}
+      />
+    );
   };
 
   const handlePowerButtonOverrideToggle = async (enabled: boolean) => {
     setIsLoading(true);
     
     try {
-      const result = await setPowerButtonOverride(enabled, overrideMode);
+      // Always use "hibernate" mode since suspend-then-hibernate is hidden
+      const result = await setPowerButtonOverride(enabled, "hibernate");
       
       if (result.success) {
         setPowerButtonOverrideState(enabled);
-        toaster.toast({
-          title: enabled ? "Power Button Override Enabled" : "Power Button Override Disabled",
-          body: enabled 
-            ? `Power button will now trigger ${overrideMode === "hibernate" ? "immediate hibernation" : "suspend-then-hibernate"}`
-            : "Power button restored to normal sleep behavior"
-        });
         await loadStatus();
       } else {
-        toaster.toast({
-          title: "Override Failed",
-          body: result.error || "Unknown error occurred"
-        });
+        console.error("Power button override failed:", result.error);
       }
     } catch (error) {
       console.error("Power button override failed:", error);
-      toaster.toast({
-        title: "Override Error",
-        body: String(error)
-      });
     } finally {
       setIsLoading(false);
     }
   };
 
+  /* Override mode change - hidden for now since only hibernate is available
   const handleOverrideModeChange = async (mode: "hibernate" | "suspend-then-hibernate") => {
     setOverrideMode(mode);
     
@@ -239,52 +222,31 @@ function Content() {
         const result = await setPowerButtonOverride(true, mode);
         
         if (result.success) {
-          toaster.toast({
-            title: "Override Mode Updated",
-            body: `Power button will now trigger ${mode === "hibernate" ? "immediate hibernation" : "suspend-then-hibernate"}`
-          });
           await loadStatus();
         } else {
-          toaster.toast({
-            title: "Mode Change Failed",
-            body: result.error || "Unknown error occurred"
-          });
+          console.error("Mode change failed:", result.error);
         }
       } catch (error) {
         console.error("Mode change failed:", error);
-        toaster.toast({
-          title: "Mode Change Error",
-          body: String(error)
-        });
       } finally {
         setIsLoading(false);
       }
     }
   };
+  */
 
+  /* Delay change - hidden for now
   const handleDelayChange = async (delayMinutes: number) => {
     setHibernateDelayMinutes(delayMinutes);
     
     try {
       const result = await setHibernateDelay(delayMinutes);
       
-      if (result.success) {
-        toaster.toast({
-          title: "Delay Updated",
-          body: `Suspend-then-hibernate delay set to ${formatDelayLabel(delayMinutes)}`
-        });
-      } else {
-        toaster.toast({
-          title: "Delay Change Failed",
-          body: result.error || "Unknown error occurred"
-        });
+      if (!result.success) {
+        console.error("Delay change failed:", result.error);
       }
     } catch (error) {
       console.error("Delay change failed:", error);
-      toaster.toast({
-        title: "Delay Change Error",
-        body: String(error)
-      });
     }
   };
 
@@ -296,6 +258,7 @@ function Content() {
       return `${hours} hr${hours !== 1 ? 's' : ''}`;
     }
   };
+  */
 
   const getStatusColor = () => {
     if (!status) return "#888";
@@ -349,13 +312,14 @@ function Content() {
           <PanelSectionRow>
             <ButtonItem
               layout="below"
-              onClick={handleHibernate}
+              onClick={showHibernateConfirmation}
               disabled={isLoading}
             >
               {isLoading ? "Hibernating..." : "Hibernate Now"}
             </ButtonItem>
           </PanelSectionRow>
 
+          {/* Suspend-then-hibernate button - hidden for now
           <PanelSectionRow>
             <ButtonItem
               layout="below"
@@ -365,6 +329,7 @@ function Content() {
               {isLoading ? "Suspending..." : `Suspend → Hibernate (${formatDelayLabel(hibernateDelayMinutes)})`}
             </ButtonItem>
           </PanelSectionRow>
+          */}
 
           <PanelSectionRow>
             <div
@@ -386,7 +351,7 @@ function Content() {
             <ToggleField
               label="Override Power Button"
               description={powerButtonOverride 
-                ? `Power button will ${overrideMode === "hibernate" ? "hibernate immediately" : "suspend then hibernate"}`
+                ? "Power button will hibernate immediately"
                 : "Power button works normally (suspend only)"
               }
               checked={powerButtonOverride}
@@ -395,6 +360,7 @@ function Content() {
             />
           </PanelSectionRow>
 
+          {/* Power button behavior dropdown - hidden for now since only hibernate is available
           {powerButtonOverride && (
             <PanelSectionRow>
               <Field 
@@ -420,7 +386,9 @@ function Content() {
               </Field>
             </PanelSectionRow>
           )}
+          */}
           
+          {/* Suspend-then-hibernate settings - hidden for now
           <PanelSectionRow>
             <div
               style={{
@@ -461,6 +429,7 @@ function Content() {
               />
             </Field>
           </PanelSectionRow>
+          */}
         </>
       )}
 
@@ -469,9 +438,9 @@ function Content() {
           <ButtonItem
             layout="below"
             onClick={handlePrepare}
-            disabled={isLoading}
+            disabled={isLoading || isSettingUp}
           >
-            {isLoading ? "Setting up..." : "Setup Hibernation"}
+            {(isLoading || isSettingUp) ? "Setting up..." : "Setup Hibernation"}
           </ButtonItem>
         </PanelSectionRow>
       )}
@@ -495,7 +464,7 @@ function Content() {
           <PanelSectionRow>
             <ButtonItem
               layout="below"
-              onClick={handleCleanup}
+              onClick={showCleanupConfirmation}
               disabled={isLoading}
             >
               {isLoading ? "Removing..." : "Remove Hibernation"}
