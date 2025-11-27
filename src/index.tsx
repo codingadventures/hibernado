@@ -259,9 +259,8 @@ function Content() {
             <ButtonItem
               layout="below"
               onClick={showHibernateConfirmation}
-              disabled={isLoading}
             >
-              {isLoading ? "Hibernating..." : "Hibernate Now"}
+              Hibernate Now
             </ButtonItem>
           </PanelSectionRow>
 
@@ -395,9 +394,8 @@ function Content() {
             <ButtonItem
               layout="below"
               onClick={showCleanupConfirmation}
-              disabled={isLoading}
             >
-              {isLoading ? "Removing..." : "Remove Hibernation"}
+              Remove Hibernation
             </ButtonItem>
           </PanelSectionRow>
         </>
