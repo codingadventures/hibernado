@@ -8,7 +8,12 @@ import {
   // Dropdown,
   // SingleDropdownOption,
   ConfirmModal,
-  showModal
+  showModal,
+  ModalRoot,
+  DialogButton,
+  DialogBody,
+  DialogBodyText,
+  DialogHeader
 } from "@decky/ui";
 import {
   callable,
@@ -25,6 +30,58 @@ const cleanupHibernate = callable<[], any>("cleanup_hibernate");
 const setPowerButtonOverride = callable<[boolean, string], any>("set_power_button_override");
 // const getHibernateDelay = callable<[], any>("get_hibernate_delay");
 // const setHibernateDelay = callable<[number], any>("set_hibernate_delay");
+
+// Custom modal component that shows hibernating state before actually hibernating
+function HibernateConfirmModal({ closeModal }: { closeModal?: () => void }) {
+  const [isHibernating, setIsHibernating] = useState(false);
+
+  const handleHibernate = async () => {
+    setIsHibernating(true);
+    
+    // Wait 1 second to show the "Hibernating..." state
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Then trigger hibernate (screen may come back on showing this modal in hibernating state)
+    try {
+      await hibernateNow();
+    } catch (error) {
+      console.error("Hibernate failed:", error);
+      setIsHibernating(false);
+    }
+  };
+
+  if (isHibernating) {
+    return (
+      <ModalRoot closeModal={closeModal}>
+        <DialogHeader>Hibernating...</DialogHeader>
+        <DialogBody>
+          <DialogBodyText>
+            Saving state to disk and powering off. The screen may wake back up briefly - this is normal.
+          </DialogBodyText>
+        </DialogBody>
+      </ModalRoot>
+    );
+  }
+
+  return (
+    <ModalRoot closeModal={closeModal}>
+      <DialogHeader>Hibernate Now</DialogHeader>
+      <DialogBody>
+        <DialogBodyText>
+          Hibernation saves your current state to disk and powers off. When you turn it back on, everything restores exactly as you left it. The screen may flicker and fans may run for up to 20 seconds before fully powering off. To wake, hold the power button slightly longer than usual.
+        </DialogBodyText>
+        <div style={{ display: "flex", gap: "10px", marginTop: "16px" }}>
+          <DialogButton onClick={handleHibernate}>
+            Hibernate Now
+          </DialogButton>
+          <DialogButton onClick={closeModal}>
+            Cancel
+          </DialogButton>
+        </div>
+      </DialogBody>
+    </ModalRoot>
+  );
+}
 
 function Content() {
   const [status, setStatus] = useState<any>(null);
@@ -101,32 +158,8 @@ function Content() {
     }
   };
 
-  const handleHibernate = async () => {
-    setIsLoading(true);
-    
-    try {
-      const result = await hibernateNow();
-      
-      if (!result.success) {
-        console.error("Hibernation failed:", result.error);
-        setIsLoading(false);
-      }
-    } catch (error) {
-      console.error("Hibernate failed:", error);
-      setIsLoading(false);
-    }
-  };
-
   const showHibernateConfirmation = () => {
-    showModal(
-      <ConfirmModal
-        strTitle="Hibernate Now"
-        strDescription="Hibernation saves your current state to disk and powers off. When you turn it back on, everything restores exactly as you left it. The screen may flicker and fans may run for up to 20 seconds before fully powering off. To wake, hold the power button slightly longer than usual."
-        strOKButtonText="Hibernate Now"
-        strCancelButtonText="Cancel"
-        onOK={handleHibernate}
-      />
-    );
+    showModal(<HibernateConfirmModal />);
   };
 
   /* Suspend-then-hibernate functionality - hidden for now
