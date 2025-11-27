@@ -35,6 +35,18 @@ const setPowerButtonOverride = callable<[boolean, string], any>("set_power_butto
 function HibernateConfirmModal({ closeModal }: { closeModal?: () => void }) {
   const [isHibernating, setIsHibernating] = useState(false);
 
+  // Auto-dismiss the modal after 4 seconds when hibernating
+  // This ensures the modal is gone when the system wakes from hibernate
+  useEffect(() => {
+    if (isHibernating && closeModal) {
+      const timer = setTimeout(() => {
+        closeModal();
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [isHibernating, closeModal]);
+
   const handleHibernate = async () => {
     setIsHibernating(true);
     
