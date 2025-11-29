@@ -294,7 +294,7 @@ function Content() {
     <PanelSection>
       {status?.ready && (
         <>
-                    <PanelSectionRow>
+          <PanelSectionRow>
             <ButtonItem
               layout="below"
               onClick={showHibernateConfirmation}
@@ -392,102 +392,6 @@ function Content() {
               />
             </Field>
           </PanelSectionRow>
-
-          {/* Suspend-then-hibernate button - hidden for now
-          <PanelSectionRow>
-            <ButtonItem
-              layout="below"
-              onClick={handleSuspendThenHibernate}
-              disabled={isLoading}
-            >
-              {isLoading ? "Suspending..." : `Suspend → Hibernate (${formatDelayLabel(hibernateDelayMinutes)})`}
-            </ButtonItem>
-          </PanelSectionRow>
-          */}
-
-          <PanelSectionRow>
-            <ToggleField
-              label="Override Power Button"
-              description={powerButtonOverride 
-                ? "Power button will hibernate immediately"
-                : "Power button works normally (suspend only)"
-              }
-              checked={powerButtonOverride}
-              onChange={handlePowerButtonOverrideToggle}
-              disabled={isLoading}
-            />
-          </PanelSectionRow>
-
-          {/* Power button behavior dropdown - hidden for now since only hibernate is available
-          {powerButtonOverride && (
-            <PanelSectionRow>
-              <Field 
-                label="Power Button Behavior"
-                childrenLayout="below"
-                childrenContainerWidth="max"
-              >
-                <Dropdown
-                  rgOptions={[
-                    {
-                      data: "hibernate" as const,
-                      label: "Hibernate Now"
-                    },
-                    {
-                      data: "suspend-then-hibernate" as const,
-                      label: `Suspend → Hibernate (${formatDelayLabel(hibernateDelayMinutes)})`
-                    }
-                  ]}
-                  selectedOption={overrideMode}
-                  onChange={(option: SingleDropdownOption) => handleOverrideModeChange(option.data as "hibernate" | "suspend-then-hibernate")}
-                  disabled={isLoading}
-                />
-              </Field>
-            </PanelSectionRow>
-          )}
-          */}
-          
-          {/* Suspend-then-hibernate settings - hidden for now
-          <PanelSectionRow>
-            <div
-              style={{
-                fontSize: "14px",
-                fontWeight: "bold",
-                marginTop: "8px",
-                marginBottom: "6px",
-                borderBottom: "1px solid rgba(255, 255, 255, 0.2)",
-                paddingBottom: "3px",
-                color: "white"
-              }}
-            >
-              Suspend-Then-Hibernate Settings
-            </div>
-          </PanelSectionRow>
-
-          <PanelSectionRow>
-            <Field 
-              label="Delay Before Hibernation"
-              childrenLayout="below"
-              childrenContainerWidth="max"
-            >
-              <Dropdown
-                rgOptions={[
-                  { data: 1, label: "1 minute" },
-                  { data: 5, label: "5 minutes" },
-                  { data: 10, label: "10 minutes" },
-                  { data: 20, label: "20 minutes" },
-                  { data: 30, label: "30 minutes" },
-                  { data: 60, label: "1 hour" },
-                  { data: 120, label: "2 hours" },
-                  { data: 180, label: "3 hours" },
-                  { data: 300, label: "5 hours" }
-                ]}
-                selectedOption={hibernateDelayMinutes}
-                onChange={(option: SingleDropdownOption) => handleDelayChange(option.data as number)}
-                disabled={isLoading}
-              />
-            </Field>
-          </PanelSectionRow>
-          */}
         </>
       )}
 
