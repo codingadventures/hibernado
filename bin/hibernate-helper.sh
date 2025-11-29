@@ -310,12 +310,16 @@ EOF
         cat > /etc/systemd/system/systemd-hibernate.service.d/hibernado-resume.conf << EOF
 [Service]
 ExecStartPre=/home/deck/.local/libexec/hibernado-set-resume.sh
+ExecStartPost=-/home/deck/.local/bin/fix-bluetooth.sh
+ExecStartPost=-/usr/bin/steamos-bootconf set-mode booted
 EOF
         
         mkdir -p /etc/systemd/system/systemd-suspend-then-hibernate.service.d
         cat > /etc/systemd/system/systemd-suspend-then-hibernate.service.d/hibernado-resume.conf << EOF
 [Service]
 ExecStartPre=/home/deck/.local/libexec/hibernado-set-resume.sh
+ExecStartPost=-/home/deck/.local/bin/fix-bluetooth.sh
+ExecStartPost=-/usr/bin/steamos-bootconf set-mode booted
 EOF
         systemctl daemon-reload
         
