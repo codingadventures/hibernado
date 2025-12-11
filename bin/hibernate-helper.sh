@@ -71,9 +71,11 @@ case "$ACTION" in
         log "Found filesystem UUID: $UUID"
         
         SWAP=/home/swapfile
+        MARKER=/home/.hibernado-swapfile
         log "Setting up hibernation (filesystem-friendly method)..."
         
         NEEDS_RECREATION=false
+        ORIGINAL_SIZE=0
         if [ -f "$SWAP" ]; then
             SWAP_SIZE=$(stat -c "%s" "$SWAP" 2>/dev/null || echo 0)
             TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
@@ -82,6 +84,7 @@ case "$ACTION" in
             if [ "$SWAP_SIZE" -lt "$MIN_SIZE" ]; then
                 log "Existing swapfile is too small (${SWAP_SIZE} bytes < ${MIN_SIZE} bytes required)"
                 NEEDS_RECREATION=true
+                ORIGINAL_SIZE=$SWAP_SIZE
             fi
             
             if ! file "$SWAP" | grep -q "swap file"; then
@@ -122,6 +125,9 @@ case "$ACTION" in
                 exit 1
             fi
             log "Swapfile formatted successfully"
+            
+            log "Creating marker file to track Hibernado-created swapfile..."
+            echo "$ORIGINAL_SIZE" > "$MARKER"
         fi
         
         if ! swapon --show=NAME | grep -q "$SWAP"; then
@@ -446,6 +452,7 @@ EOF
         
     cleanup)
         SWAP=/home/swapfile
+        MARKER=/home/.hibernado-swapfile
         
         log "Cleaning up hibernation configuration..."
         
@@ -518,14 +525,31 @@ EOF
             rm -f /etc/systemd/system/home-swapfile.swap
         fi
         
-        if swapon --show=NAME | grep -q "$SWAP"; then
-            log "Deactivating swapfile..."
-            swapoff "$SWAP" 2>&1 || log "WARNING: Failed to deactivate swapfile"
-        fi
-        
-        if [ -f "$SWAP" ]; then
-            log "Removing swapfile..."
-            rm -f "$SWAP" 2>&1 || log "WARNING: Failed to remove swapfile"
+        if [ -f "$MARKER" ]; then
+            if swapon --show=NAME | grep -q "$SWAP"; then
+                log "Deactivating swapfile..."
+                swapoff "$SWAP" 2>&1 || log "WARNING: Failed to deactivate swapfile"
+            fi
+            
+            ORIGINAL_SIZE=$(cat "$MARKER" 2>/dev/null || echo 0)
+            if [ -f "$SWAP" ]; then
+                log "Removing Hibernado-created swapfile..."
+                rm -f "$SWAP" 2>&1 || log "WARNING: Failed to remove swapfile"
+            fi
+            
+            if [ "$ORIGINAL_SIZE" -gt 0 ]; then
+                log "Recreating original swapfile (${ORIGINAL_SIZE} bytes)..."
+                if fallocate -l "$ORIGINAL_SIZE" "$SWAP" 2>&1 && chmod 600 "$SWAP" && mkswap "$SWAP" >/dev/null 2>&1; then
+                    log "Original swapfile restored"
+                else
+                    log "WARNING: Failed to restore original swapfile"
+                fi
+            fi
+            
+            log "Removing marker file..."
+            rm -f "$MARKER"
+        else
+            log "Marker file not found - preserving user's existing swapfile"
         fi
         
         log "Cleanup complete. All hibernation configuration has been removed."
