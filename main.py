@@ -1,6 +1,5 @@
 import os
 import subprocess
-import re
 from pathlib import Path
 import decky
 import asyncio
@@ -342,104 +341,30 @@ class Plugin:
             }
 
     async def trigger_hibernate(self) -> dict:
-        """Trigger system hibernation"""
+        """Trigger system hibernation via systemd.
+
+        Routing through `systemctl hibernate` ensures hibernate.target is reached
+        so the post-resume hooks (Bluetooth fix, SteamOS boot-counter reset) run.
+        Resume parameters are applied by the ExecStartPre drop-in installed during
+        prepare. A timeout is treated as success since systemctl blocks until the
+        system resumes.
+        """
         try:
             self._reset_boot_counter()
             decky.logger.info("Triggering hibernation...")
-            
-            try:
-                result = subprocess.run(
-                    ["findmnt", "-no", "SOURCE", "-T", "/home"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                
-                if result.returncode != 0:
-                    raise Exception("Could not find /home device")
-                
-                dev_path = result.stdout.strip()
-                decky.logger.info(f"Found /home device: {dev_path}")
-                
-                stat_result = subprocess.run(
-                    ["stat", "-c", "%t:%T", dev_path],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                
-                if stat_result.returncode != 0:
-                    raise Exception("Could not stat device")
-                
-                major_hex, minor_hex = stat_result.stdout.strip().split(":")
-                major = int(major_hex, 16)
-                minor = int(minor_hex, 16)
-                resume_dev = f"{major}:{minor}"
-                decky.logger.info(f"Device numbers: {resume_dev}")
-                
-                # Get swapfile offset
-                result = subprocess.run(
-                    ["filefrag", "-v", "/home/swapfile"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
-                
-                if result.returncode != 0:
-                    raise Exception("Could not get swapfile offset")
-                
-                for line in result.stdout.splitlines():
-                    if line.strip().startswith("0:"):
-                        parts = line.split()
-                        if len(parts) >= 4:
-                            offset = parts[3].rstrip(".")
-                            decky.logger.info(f"Swapfile offset: {offset}")
-                            break
-                else:
-                    raise Exception("Could not parse swapfile offset")
-                
-                decky.logger.info(f"Setting resume device to {resume_dev}, offset {offset}")
-                
-                with open("/sys/power/resume", "w") as f:
-                    f.write(f"{resume_dev}\n")
-                    f.flush()
-                
-                with open("/sys/power/resume_offset", "w") as f:
-                    f.write(f"{offset}\n")
-                    f.flush()
-                
-                decky.logger.info("Resume parameters set successfully")
-                
-            except Exception as resume_error:
-                error_msg = f"Failed to set resume parameters: {resume_error}"
-                decky.logger.error(error_msg)
+
+            returncode, stdout, stderr = self._run_helper("hibernate", timeout=10)
+
+            # systemctl blocks until the system resumes, so a helper timeout is
+            # the expected outcome rather than a failure.
+            if returncode != 0 and "timeout" not in stderr.lower():
+                error_msg = stderr or "Unknown error during hibernation"
+                decky.logger.error(f"Hibernation failed: {error_msg}")
                 return {
                     "success": False,
                     "error": error_msg
                 }
-            
-            try:
-                with open("/sys/power/disk", "w") as f:
-                    f.write("platform\n")
-                    f.flush()
-                decky.logger.info("Hibernation mode set to 'platform'")
-            except Exception as disk_error:
-                decky.logger.warning(f"Could not set /sys/power/disk: {disk_error}")
-            
-            subprocess.run(["/usr/bin/sync"], check=False)
-            
-            try:
-                with open("/sys/power/state", "w") as f:
-                    f.write("disk\n")
-                    f.flush()
-            except Exception as write_error:
-                error_msg = f"Failed to write to /sys/power/state: {write_error}"
-                decky.logger.error(error_msg)
-                return {
-                    "success": False,
-                    "error": error_msg
-                }
-            
+
             decky.logger.info("Hibernation triggered successfully")
             return {
                 "success": True,

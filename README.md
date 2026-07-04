@@ -45,9 +45,10 @@ For technical details, see the implementation in `bin/hibernate-helper.sh`.
 # Install dependencies
 pnpm install
 
-# Build plugin
+# Build the installable plugin zip (via the Decky CLI)
 just build
-# OR
+
+# Build only the frontend bundle (no zip)
 pnpm run build
 
 # Clean build artifacts
@@ -56,7 +57,7 @@ just clean
 
 ### Testing on Steam Deck
 
-Update the Deck's IP address in `justfile` (default: 192.168.0.6), then:
+Update the Deck's IP address in `justfile` (default: 192.168.1.18), then:
 
 ```bash
 # Build, deploy, and watch logs

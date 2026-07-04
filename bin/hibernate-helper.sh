@@ -352,43 +352,12 @@ EOF
         ;;
         
     hibernate)
-        log "Preparing to hibernate..."
-        
-        # Get UUID and offset for resume
-        UUID=$(findmnt -no UUID -T /home)
-        SWAP=/home/swapfile
-        OFF=$(filefrag -v "$SWAP" | awk '$1=="0:" {print substr($4, 1, length($4)-2)}')
-        
-        if [ -z "$UUID" ] || [ -z "$OFF" ]; then
-            log "ERROR: Could not determine resume parameters"
-            echo "ERROR: Missing UUID or offset" >&2
-            exit 1
-        fi
-        
-        DEV_PATH=$(findmnt -no SOURCE -T /home)
-        MAJOR=$(stat -c "%t" "$DEV_PATH" 2>/dev/null)
-        MINOR=$(stat -c "%T" "$DEV_PATH" 2>/dev/null)
-        
-        if [ -z "$MAJOR" ] || [ -z "$MINOR" ]; then
-            log "ERROR: Could not determine device numbers"
-            echo "ERROR: Missing device numbers" >&2
-            exit 1
-        fi
-        
-        # Convert hex to decimal and write to /sys/power/resume
-        MAJOR_DEC=$((16#$MAJOR))
-        MINOR_DEC=$((16#$MINOR))
-        RESUME_DEV="$MAJOR_DEC:$MINOR_DEC"
-        
-        log "Setting resume device to $RESUME_DEV (offset: $OFF)"
-        echo "$RESUME_DEV" > /sys/power/resume 2>/dev/null || log "WARNING: Could not set resume device"
-        echo "$OFF" > /sys/power/resume_offset 2>/dev/null || log "WARNING: Could not set resume offset"
-        
-        log "Syncing filesystems..."
-        sync
-        
-        log "Triggering hibernation..."
-        echo disk > /sys/power/state
+        # Trigger immediate hibernation via systemd so that hibernate.target is
+        # reached and the post-resume hooks (Bluetooth fix, boot-counter reset)
+        # run. Resume parameters are set by the ExecStartPre drop-in that
+        # `prepare` installs on systemd-hibernate.service.
+        log "Triggering hibernation via systemctl..."
+        systemctl hibernate
         ;;
         
     suspend-then-hibernate)

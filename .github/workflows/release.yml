@@ -56,9 +56,9 @@ jobs:
       - name: Rename zip file
         run: |
           cd out
-          # Rename from capital case to lowercase if needed
-          if [ -f "Hibernato.zip" ]; then
-            mv Hibernato.zip hibernado.zip
+          # decky CLI outputs Hibernado.zip (from plugin.json name); normalize to lowercase
+          if [ -f "Hibernado.zip" ]; then
+            mv Hibernado.zip hibernado.zip
           fi
           ls -la
       

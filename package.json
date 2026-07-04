@@ -1,6 +1,6 @@
 {
   "name": "hibernado",
-  "version": "1.4.3",
+  "version": "1.4.4",
   "description": "Easily hibernate and suspend-hibernate your Steam Deck inside game mode.",
   "type": "module",
   "scripts": {
