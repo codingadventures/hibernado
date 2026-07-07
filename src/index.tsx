@@ -30,6 +30,8 @@ const cleanupHibernate = callable<[], any>("cleanup_hibernate");
 const setPowerButtonOverride = callable<[boolean, string], any>("set_power_button_override");
 const getHibernateDelay = callable<[], any>("get_hibernate_delay");
 const setHibernateDelay = callable<[number], any>("set_hibernate_delay");
+const getHibernateOnAc = callable<[], any>("get_hibernate_on_ac");
+const setHibernateOnAc = callable<[boolean], any>("set_hibernate_on_ac");
 
 // Custom modal component that shows hibernating state before actually hibernating
 function HibernateConfirmModal({ closeModal }: { closeModal?: () => void }) {
@@ -102,6 +104,7 @@ function Content() {
   const [powerButtonOverride, setPowerButtonOverrideState] = useState(false);
   const [overrideMode, setOverrideMode] = useState<"hibernate" | "suspend-then-hibernate">("hibernate");
   const [hibernateDelayMinutes, setHibernateDelayMinutes] = useState<number>(60);
+  const [hibernateOnAc, setHibernateOnAcState] = useState<boolean>(false);
 
   useEffect(() => {
     loadStatus();
@@ -136,11 +139,16 @@ function Content() {
         setIsSettingUp(false);
       }
       
-      // Load hibernate delay setting
+      // Load hibernate delay + AC-power settings
       if (result.ready) {
         const delayResult = await getHibernateDelay();
         if (delayResult.success && delayResult.delay_minutes) {
           setHibernateDelayMinutes(delayResult.delay_minutes);
+        }
+
+        const acResult = await getHibernateOnAc();
+        if (acResult.success) {
+          setHibernateOnAcState(!!acResult.on_ac);
         }
       }
     } catch (error) {
@@ -281,6 +289,20 @@ function Content() {
     }
   };
 
+  const handleAcToggle = async (enabled: boolean) => {
+    setHibernateOnAcState(enabled);
+
+    try {
+      const result = await setHibernateOnAc(enabled);
+
+      if (!result.success) {
+        console.error("AC power toggle failed:", result.error);
+      }
+    } catch (error) {
+      console.error("AC power toggle failed:", error);
+    }
+  };
+
   const formatDelayLabel = (minutes: number): string => {
     if (minutes < 60) {
       return `${minutes} min`;
@@ -391,6 +413,19 @@ function Content() {
                 disabled={isLoading}
               />
             </Field>
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <ToggleField
+              label="Hibernate While Charging"
+              description={hibernateOnAc
+                ? "Will still hibernate after the delay while on AC power"
+                : "While charging, stays suspended and won't hibernate (fast resume)"
+              }
+              checked={hibernateOnAc}
+              onChange={handleAcToggle}
+              disabled={isLoading}
+            />
           </PanelSectionRow>
         </>
       )}

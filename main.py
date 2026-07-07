@@ -551,6 +551,78 @@ class Plugin:
                 "delay_minutes": 60  # Default fallback
             }
 
+    async def get_hibernate_on_ac(self) -> dict:
+        """Get whether the system hibernates (via suspend-then-hibernate) while on AC power
+
+        Returns:
+            dict with success, on_ac (bool)
+        """
+        try:
+            decky.logger.info("Getting HibernateOnACPower setting...")
+
+            returncode, stdout, stderr = self._run_helper("get-ac-power", timeout=5)
+
+            if returncode != 0:
+                decky.logger.warning(f"Could not get AC power setting: {stderr}")
+                return {
+                    "success": True,
+                    "on_ac": False
+                }
+
+            on_ac = stdout.strip() == "yes"
+            decky.logger.info(f"HibernateOnACPower: {on_ac}")
+            return {
+                "success": True,
+                "on_ac": on_ac
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            decky.logger.error(f"Error getting HibernateOnACPower: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg,
+                "on_ac": False
+            }
+
+    async def set_hibernate_on_ac(self, on_ac: bool) -> dict:
+        """Set whether the system hibernates while on AC power
+
+        Args:
+            on_ac: True to also hibernate after the delay while charging,
+                   False to stay suspended (and only hibernate on battery)
+        """
+        try:
+            value = "yes" if on_ac else "no"
+            decky.logger.info(f"Setting HibernateOnACPower to {value}...")
+
+            returncode, stdout, stderr = self._run_helper(
+                "set-ac-power", value,
+                timeout=10
+            )
+
+            if returncode != 0:
+                error_msg = stderr or "Unknown error setting HibernateOnACPower"
+                decky.logger.error(f"Set AC power failed: {error_msg}")
+                return {
+                    "success": False,
+                    "error": error_msg
+                }
+
+            decky.logger.info(f"HibernateOnACPower set to {value} successfully")
+            return {
+                "success": True,
+                "message": f"HibernateOnACPower set to {value}"
+            }
+
+        except Exception as e:
+            error_msg = str(e)
+            decky.logger.error(f"Error setting HibernateOnACPower: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg
+            }
+
     async def set_hibernate_delay(self, delay_minutes: int) -> dict:
         """Set the hibernate delay for suspend-then-hibernate
         

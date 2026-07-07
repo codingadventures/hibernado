@@ -9,6 +9,82 @@ log() {
     echo "[hibernado] $1" >&2
 }
 
+# --- Paths -------------------------------------------------------------------
+# Sleep policy is written as a drop-in (NOT the main /etc/systemd/sleep.conf).
+# systemd merges drop-ins on top of the main file, and SteamOS ships its own
+# /usr/lib/systemd/sleep.conf.d/steamos-suspend-then-hibernate.conf. The main
+# file is the LOWEST precedence, so writing there gets silently overridden. A
+# drop-in named to sort AFTER "steamos-" (and living in /etc, which beats
+# /usr/lib) is what actually takes effect.
+SLEEP_DROPIN="/etc/systemd/sleep.conf.d/zz-hibernado.conf"
+LEGACY_SLEEP_CONF="/etc/systemd/sleep.conf"
+LOGIND_BYPASS="/etc/systemd/system/systemd-logind.service.d/hibernado-override.conf"
+DEFAULT_DELAY_MIN=60
+DEFAULT_AC_POWER=no   # match SteamOS: only auto-hibernate on battery by default
+
+read_current_delay() {
+    # Echo the current delay (minutes) from the drop-in, or the default.
+    local d=""
+    if [ -f "$SLEEP_DROPIN" ]; then
+        d=$(grep "^HibernateDelaySec=" "$SLEEP_DROPIN" | cut -d'=' -f2 | sed 's/min$//')
+    fi
+    echo "${d:-$DEFAULT_DELAY_MIN}"
+}
+
+read_current_ac() {
+    # Echo the current HibernateOnACPower (yes/no) from the drop-in, or default.
+    local a=""
+    if [ -f "$SLEEP_DROPIN" ]; then
+        a=$(grep "^HibernateOnACPower=" "$SLEEP_DROPIN" | cut -d'=' -f2)
+    fi
+    echo "${a:-$DEFAULT_AC_POWER}"
+}
+
+write_sleep_dropin() {
+    # $1 = hibernate delay in minutes (defaults to DEFAULT_DELAY_MIN)
+    # $2 = HibernateOnACPower, "yes" or "no" (defaults to DEFAULT_AC_POWER)
+    local delay_min="${1:-$DEFAULT_DELAY_MIN}"
+    local ac_power="${2:-$DEFAULT_AC_POWER}"
+    mkdir -p "$(dirname "$SLEEP_DROPIN")"
+    cat > "$SLEEP_DROPIN" << EOF
+# hibernado plugin - suspend-then-hibernate configuration
+# Drop-in (sorts after SteamOS's steamos-*.conf and lives in /etc) so it takes
+# precedence over the SteamOS-shipped /usr/lib sleep defaults.
+[Sleep]
+AllowSuspend=yes
+AllowHibernation=yes
+AllowSuspendThenHibernate=yes
+HibernateDelaySec=${delay_min}min
+# HibernateOnACPower=no  -> only count the timer down on battery (stay suspended
+#   while charging = fast resume). =yes -> also hibernate after the delay on AC.
+HibernateOnACPower=${ac_power}
+EOF
+}
+
+remove_memory_check_bypass() {
+    # Older versions installed a logind override setting
+    # SYSTEMD_BYPASS_HIBERNATION_MEMORY_CHECK=1. That disabled systemd's
+    # pre-hibernate memory check, which let an out-of-memory hibernate be
+    # *attempted* (aborting mid-snapshot and crashing amdgpu) instead of being
+    # safely refused. Never install it; remove it if present (migration).
+    if [ -f "$LOGIND_BYPASS" ]; then
+        log "Removing unsafe hibernation memory-check bypass..."
+        rm -f "$LOGIND_BYPASS"
+        rmdir /etc/systemd/system/systemd-logind.service.d 2>/dev/null || true
+        systemctl daemon-reload 2>/dev/null || true
+    fi
+}
+
+migrate_legacy_sleep_conf() {
+    # Older versions overwrote the main /etc/systemd/sleep.conf (lowest
+    # precedence, overridden by SteamOS's drop-in). Remove it only if we
+    # recognise it as ours, so our drop-in wins cleanly.
+    if [ -f "$LEGACY_SLEEP_CONF" ] && grep -q "hibernado plugin" "$LEGACY_SLEEP_CONF" 2>/dev/null; then
+        log "Removing legacy hibernado /etc/systemd/sleep.conf (superseded by drop-in)..."
+        rm -f "$LEGACY_SLEEP_CONF"
+    fi
+}
+
 ACTION="${1:-status}"
 
 case "$ACTION" in
@@ -41,17 +117,14 @@ case "$ACTION" in
             exit 0
         fi
         
-        if ! systemctl cat systemd-logind.service 2>/dev/null | grep -q "SYSTEMD_BYPASS_HIBERNATION_MEMORY_CHECK"; then
-            echo "SYSTEMD_NOT_CONFIGURED"
-            exit 0
-        fi
-        
         if [ ! -f /etc/systemd/system/fix-bluetooth-resume.service ]; then
             echo "BLUETOOTH_FIX_MISSING"
             exit 0
         fi
         
-        if [ ! -f /etc/systemd/sleep.conf ] || ! grep -q "HibernateDelaySec" /etc/systemd/sleep.conf 2>/dev/null; then
+        # Sleep policy must live in our drop-in (see write_sleep_dropin). A
+        # legacy main sleep.conf alone is NOT sufficient - it gets overridden.
+        if [ ! -f "$SLEEP_DROPIN" ] || ! grep -q "HibernateDelaySec" "$SLEEP_DROPIN" 2>/dev/null; then
             echo "SLEEP_CONF_NOT_CONFIGURED"
             exit 0
         fi
@@ -195,13 +268,11 @@ EOF
             log "GRUB config already exists"
         fi
         
-        log "Configuring systemd-logind..."
-        mkdir -p /etc/systemd/system/systemd-logind.service.d
-        cat > /etc/systemd/system/systemd-logind.service.d/hibernado-override.conf << EOF
-[Service]
-Environment=SYSTEMD_BYPASS_HIBERNATION_MEMORY_CHECK=1
-EOF
-        systemctl daemon-reload
+        # NOTE: We intentionally do NOT bypass systemd's pre-hibernate memory
+        # check. If free RAM is too low to build the hibernation image (e.g. a
+        # heavy game is loaded), systemd will now *refuse* to hibernate (staying
+        # safely suspended) instead of aborting mid-snapshot and crashing the GPU.
+        remove_memory_check_bypass
         
         log "Setting up Bluetooth fix for resume..."
         mkdir -p /home/deck/.local/bin
@@ -246,17 +317,12 @@ EOF
         systemctl daemon-reload
         systemctl enable fix-bluetooth-resume.service
         
-        # 7. Configure sleep.conf for suspend-then-hibernate (60 min default)
+        # 7. Configure suspend-then-hibernate timing via a drop-in that actually
+        #    overrides SteamOS's shipped defaults (default delay).
         log "Configuring suspend-then-hibernate timing..."
-        cat > /etc/systemd/sleep.conf << EOF
-# hibernado plugin - suspend-then-hibernate configuration
-[Sleep]
-AllowSuspend=yes
-AllowHibernation=yes
-AllowSuspendThenHibernate=yes
-HibernateDelaySec=60min
-EOF
-        systemctl daemon-reload
+        migrate_legacy_sleep_conf
+        # Preserve any values the user already chose via the UI on re-setup.
+        write_sleep_dropin "$(read_current_delay)" "$(read_current_ac)"
         
         log "Creating hibernate resume setup script in /home..."
         mkdir -p /home/deck/.local/libexec
@@ -461,10 +527,13 @@ EOF
         systemctl disable steamos-hibernate-success.service 2>/dev/null || true
         rm -f /etc/systemd/system/steamos-hibernate-success.service
         
-        if [ -f /etc/systemd/sleep.conf ]; then
-            log "Removing sleep configuration..."
-            rm -f /etc/systemd/sleep.conf
+        if [ -f "$SLEEP_DROPIN" ]; then
+            log "Removing sleep configuration drop-in..."
+            rm -f "$SLEEP_DROPIN"
+            rmdir /etc/systemd/sleep.conf.d 2>/dev/null || true
         fi
+        # Remove any legacy main sleep.conf we may have written in older versions
+        migrate_legacy_sleep_conf
         
         if [ -d /etc/systemd/system/systemd-hibernate.service.d ]; then
             log "Removing hibernate service drop-in..."
@@ -526,17 +595,17 @@ EOF
         ;;
     
     get-delay)
-        # Get current hibernate delay setting from sleep.conf
-        if [ -f /etc/systemd/sleep.conf ]; then
+        # Get current hibernate delay setting from our sleep drop-in
+        if [ -f "$SLEEP_DROPIN" ]; then
             # Extract the delay value (strip 'min' suffix and get the number)
-            DELAY=$(grep "^HibernateDelaySec=" /etc/systemd/sleep.conf | cut -d'=' -f2 | sed 's/min$//')
+            DELAY=$(grep "^HibernateDelaySec=" "$SLEEP_DROPIN" | cut -d'=' -f2 | sed 's/min$//')
             if [ -n "$DELAY" ]; then
                 echo "$DELAY"
                 exit 0
             fi
         fi
-        # Default to 60 if not found
-        echo "60"
+        # Default if not found
+        echo "$DEFAULT_DELAY_MIN"
         exit 0
         ;;
     
@@ -556,23 +625,37 @@ EOF
         
         log "Setting hibernate delay to $DELAY_MIN minutes..."
         
-        # Update sleep.conf with new delay
-        cat > /etc/systemd/sleep.conf << EOF
-# hibernado plugin - suspend-then-hibernate configuration
-[Sleep]
-AllowSuspend=yes
-AllowHibernation=yes
-AllowSuspendThenHibernate=yes
-HibernateDelaySec=${DELAY_MIN}min
-EOF
-        
-        systemctl daemon-reload
+        # Update the sleep drop-in with the new delay, preserving the AC setting.
+        migrate_legacy_sleep_conf
+        write_sleep_dropin "$DELAY_MIN" "$(read_current_ac)"
         log "Hibernate delay set to $DELAY_MIN minutes"
+        exit 0
+        ;;
+    
+    get-ac-power)
+        # Echo current HibernateOnACPower value ("yes" or "no")
+        read_current_ac
+        exit 0
+        ;;
+    
+    set-ac-power)
+        # Set whether to hibernate while on AC power: $2 = "yes" or "no"
+        AC="${2:-}"
+        if [ "$AC" != "yes" ] && [ "$AC" != "no" ]; then
+            log "ERROR: set-ac-power requires 'yes' or 'no'"
+            exit 1
+        fi
+        
+        log "Setting HibernateOnACPower to $AC..."
+        # Rewrite the drop-in with the new AC setting, preserving the delay.
+        migrate_legacy_sleep_conf
+        write_sleep_dropin "$(read_current_delay)" "$AC"
+        log "HibernateOnACPower set to $AC"
         exit 0
         ;;
         
     *)
-        echo "Usage: $0 {status|prepare|hibernate|suspend-then-hibernate|set-power-button|get-delay|set-delay|cleanup}"
+        echo "Usage: $0 {status|prepare|hibernate|suspend-then-hibernate|set-power-button|get-delay|set-delay|get-ac-power|set-ac-power|cleanup}"
         exit 1
         ;;
 esac

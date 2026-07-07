@@ -7,7 +7,7 @@ build:
     .vscode/build.sh
 
 test:
-    .vscode/build.sh && scp out/Hibernado.zip deck@192.168.1.18:~ && clear && ssh deck@192.168.1.18 'journalctl --follow'
+    .vscode/build.sh && scp out/Hibernado.zip deck@192.168.0.232:~ && clear && ssh deck@192.168.0.232 'journalctl --follow'
 
 clean:
     rm -rf out
@@ -16,10 +16,10 @@ clean:
     rm -rf .rollup.cache
 
 watch:
-    ssh deck@192.168.1.18 'journalctl --follow'
+    ssh deck@192.168.0.232 'journalctl --follow'
 
 ssh:
-    ssh deck@192.168.1.18
+    ssh deck@192.168.0.232
 
 send:
-    scp out/Hibernado.zip deck@192.168.1.18:~ && clear && ssh deck@192.168.1.18 'journalctl --follow'
+    scp out/Hibernado.zip deck@192.168.0.232:~ && clear && ssh deck@192.168.0.232 'journalctl --follow'
