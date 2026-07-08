@@ -623,6 +623,57 @@ class Plugin:
                 "error": error_msg
             }
 
+    async def get_zram_disabled(self) -> dict:
+        """Get whether hibernado has persistently disabled zram
+
+        Returns:
+            dict with success, disabled (bool)
+        """
+        try:
+            returncode, stdout, stderr = self._run_helper("get-zram-disabled", timeout=5)
+            if returncode != 0:
+                decky.logger.warning(f"Could not get zram state: {stderr}")
+                return {"success": True, "disabled": False}
+            disabled = stdout.strip() == "yes"
+            return {"success": True, "disabled": disabled}
+        except Exception as e:
+            error_msg = str(e)
+            decky.logger.error(f"Error getting zram state: {error_msg}")
+            return {"success": False, "error": error_msg, "disabled": False}
+
+    async def set_zram_disabled(self, disabled: bool) -> dict:
+        """Persistently disable or re-enable SteamOS zram
+
+        Disabling zram frees physical RAM so hibernation can succeed while a
+        memory-heavy game is running (prevents the amdgpu -ENOMEM freeze failure).
+
+        Args:
+            disabled: True to disable zram, False to restore it
+        """
+        try:
+            value = "yes" if disabled else "no"
+            decky.logger.info(f"Setting zram-disabled to {value}...")
+
+            returncode, stdout, stderr = self._run_helper(
+                "set-zram-disabled", value,
+                timeout=60
+            )
+
+            if returncode != 0:
+                error_msg = stderr or "Unknown error setting zram state"
+                decky.logger.error(f"Set zram-disabled failed: {error_msg}")
+                return {"success": False, "error": error_msg}
+
+            decky.logger.info(f"zram-disabled set to {value} successfully")
+            return {
+                "success": True,
+                "message": f"zram {'disabled' if disabled else 'enabled'}"
+            }
+        except Exception as e:
+            error_msg = str(e)
+            decky.logger.error(f"Error setting zram state: {error_msg}")
+            return {"success": False, "error": error_msg}
+
     async def set_hibernate_delay(self, delay_minutes: int) -> dict:
         """Set the hibernate delay for suspend-then-hibernate
         

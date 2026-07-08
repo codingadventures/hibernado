@@ -32,6 +32,8 @@ const getHibernateDelay = callable<[], any>("get_hibernate_delay");
 const setHibernateDelay = callable<[number], any>("set_hibernate_delay");
 const getHibernateOnAc = callable<[], any>("get_hibernate_on_ac");
 const setHibernateOnAc = callable<[boolean], any>("set_hibernate_on_ac");
+const getZramDisabled = callable<[], any>("get_zram_disabled");
+const setZramDisabled = callable<[boolean], any>("set_zram_disabled");
 
 // Custom modal component that shows hibernating state before actually hibernating
 function HibernateConfirmModal({ closeModal }: { closeModal?: () => void }) {
@@ -105,6 +107,7 @@ function Content() {
   const [overrideMode, setOverrideMode] = useState<"hibernate" | "suspend-then-hibernate">("hibernate");
   const [hibernateDelayMinutes, setHibernateDelayMinutes] = useState<number>(60);
   const [hibernateOnAc, setHibernateOnAcState] = useState<boolean>(false);
+  const [zramDisabled, setZramDisabledState] = useState<boolean>(false);
 
   useEffect(() => {
     loadStatus();
@@ -149,6 +152,11 @@ function Content() {
         const acResult = await getHibernateOnAc();
         if (acResult.success) {
           setHibernateOnAcState(!!acResult.on_ac);
+        }
+
+        const zramResult = await getZramDisabled();
+        if (zramResult.success) {
+          setZramDisabledState(!!zramResult.disabled);
         }
       }
     } catch (error) {
@@ -303,6 +311,25 @@ function Content() {
     }
   };
 
+  const handleZramToggle = async (enabled: boolean) => {
+    setIsLoading(true);
+    setZramDisabledState(enabled);
+
+    try {
+      const result = await setZramDisabled(enabled);
+
+      if (!result.success) {
+        console.error("zram toggle failed:", result.error);
+        setZramDisabledState(!enabled);
+      }
+    } catch (error) {
+      console.error("zram toggle failed:", error);
+      setZramDisabledState(!enabled);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const formatDelayLabel = (minutes: number): string => {
     if (minutes < 60) {
       return `${minutes} min`;
@@ -424,6 +451,19 @@ function Content() {
               }
               checked={hibernateOnAc}
               onChange={handleAcToggle}
+              disabled={isLoading}
+            />
+          </PanelSectionRow>
+
+          <PanelSectionRow>
+            <ToggleField
+              label="Disable zram (better in-game hibernation)"
+              description={zramDisabled
+                ? "zram off: frees RAM so hibernation works while heavy games are running"
+                : "zram on (SteamOS default): hibernating from a heavy game may fail"
+              }
+              checked={zramDisabled}
+              onChange={handleZramToggle}
               disabled={isLoading}
             />
           </PanelSectionRow>

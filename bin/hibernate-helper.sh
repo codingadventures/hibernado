@@ -22,6 +22,60 @@ LOGIND_BYPASS="/etc/systemd/system/systemd-logind.service.d/hibernado-override.c
 DEFAULT_DELAY_MIN=60
 DEFAULT_AC_POWER=no   # match SteamOS: only auto-hibernate on battery by default
 
+# Opt-in: persistently disable SteamOS's zram swap. zram holds compressed pages
+# in RAM, which (a) bloats the hibernation image and (b) starves the physical
+# RAM the GPU driver needs to evict its buffers during hibernate -> amdgpu
+# returns -ENOMEM and the hibernate is refused (or, historically, crashed).
+# /etc/systemd/zram-generator.conf overrides the SteamOS /usr/lib config; a
+# device with final size 0 is discarded (per zram-generator.conf(5)).
+ZRAM_CONF="/etc/systemd/zram-generator.conf"
+ZRAM_CONF_BAK="/etc/systemd/zram-generator.conf.hibernado-orig"
+
+zram_is_disabled() {
+    [ -f "$ZRAM_CONF" ] && grep -q "hibernado" "$ZRAM_CONF" 2>/dev/null
+}
+
+apply_zram_off_now() {
+    # Deactivate zram immediately so the change applies without a reboot.
+    swapoff /dev/zram0 2>/dev/null || true
+    systemctl stop dev-zram0.swap 2>/dev/null || true
+    systemctl stop "systemd-zram-setup@zram0.service" 2>/dev/null || true
+}
+
+apply_zram_on_now() {
+    # Best-effort re-activation without a reboot (a reboot always restores it).
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl start "systemd-zram-setup@zram0.service" 2>/dev/null || true
+    systemctl start dev-zram0.swap 2>/dev/null || true
+}
+
+enable_zram_disable() {
+    # Preserve a pre-existing (non-ours) config so we can restore it later.
+    if [ -f "$ZRAM_CONF" ] && ! grep -q "hibernado" "$ZRAM_CONF" 2>/dev/null; then
+        log "Backing up existing zram-generator.conf..."
+        mv "$ZRAM_CONF" "$ZRAM_CONF_BAK"
+    fi
+    cat > "$ZRAM_CONF" << EOF
+# hibernado plugin - disable zram so hibernation has enough free RAM.
+# Remove this file (or toggle off in the plugin) to restore SteamOS zram.
+[zram0]
+zram-size = 0
+host-memory-limit = 0
+EOF
+    systemctl daemon-reload 2>/dev/null || true
+    apply_zram_off_now
+}
+
+disable_zram_disable() {
+    if [ -f "$ZRAM_CONF" ] && grep -q "hibernado" "$ZRAM_CONF" 2>/dev/null; then
+        rm -f "$ZRAM_CONF"
+    fi
+    if [ -f "$ZRAM_CONF_BAK" ]; then
+        mv "$ZRAM_CONF_BAK" "$ZRAM_CONF"
+    fi
+    apply_zram_on_now
+}
+
 read_current_delay() {
     # Echo the current delay (minutes) from the drop-in, or the default.
     local d=""
@@ -373,6 +427,12 @@ echo "$OFF" > /sys/power/resume_offset 2>/dev/null || echo "[hibernado] WARNING:
 
 # Set hibernation mode
 echo "platform" > /sys/power/disk 2>/dev/null || echo "[hibernado] WARNING: Could not set hibernation mode" >&2
+
+# Shrink the hibernation image as much as possible before snapshotting. This
+# forces the kernel to reclaim memory up front, leaving enough free physical
+# RAM for the GPU driver to evict its buffers during freeze (amdgpu otherwise
+# fails with -ENOMEM when a heavy game is running). Costs a little extra time.
+echo 0 > /sys/power/image_size 2>/dev/null || echo "[hibernado] WARNING: Could not set image_size" >&2
 EOF
         chmod +x /home/deck/.local/libexec/hibernado-set-resume.sh
         chown deck:deck /home/deck/.local/libexec/hibernado-set-resume.sh
@@ -534,6 +594,12 @@ EOF
         fi
         # Remove any legacy main sleep.conf we may have written in older versions
         migrate_legacy_sleep_conf
+
+        # Restore SteamOS zram if we had disabled it
+        if zram_is_disabled || [ -f "$ZRAM_CONF_BAK" ]; then
+            log "Restoring zram configuration..."
+            disable_zram_disable
+        fi
         
         if [ -d /etc/systemd/system/systemd-hibernate.service.d ]; then
             log "Removing hibernate service drop-in..."
@@ -653,9 +719,36 @@ EOF
         log "HibernateOnACPower set to $AC"
         exit 0
         ;;
+    
+    get-zram-disabled)
+        # Echo "yes" if hibernado has persistently disabled zram, else "no"
+        if zram_is_disabled; then echo "yes"; else echo "no"; fi
+        exit 0
+        ;;
+    
+    set-zram-disabled)
+        # Persistently disable/enable SteamOS zram: $2 = "yes" (disable) | "no" (enable)
+        case "${2:-}" in
+            yes)
+                log "Disabling zram (persistent, for hibernating under memory pressure)..."
+                enable_zram_disable
+                log "zram disabled"
+                ;;
+            no)
+                log "Re-enabling zram..."
+                disable_zram_disable
+                log "zram enabled"
+                ;;
+            *)
+                log "ERROR: set-zram-disabled requires 'yes' or 'no'"
+                exit 1
+                ;;
+        esac
+        exit 0
+        ;;
         
     *)
-        echo "Usage: $0 {status|prepare|hibernate|suspend-then-hibernate|set-power-button|get-delay|set-delay|get-ac-power|set-ac-power|cleanup}"
+        echo "Usage: $0 {status|prepare|hibernate|suspend-then-hibernate|set-power-button|get-delay|set-delay|get-ac-power|set-ac-power|get-zram-disabled|set-zram-disabled|cleanup}"
         exit 1
         ;;
 esac

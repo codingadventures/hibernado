@@ -428,8 +428,10 @@ plugin's helper (`bin/hibernate-helper.sh`):
    and `get-delay` read/write this drop-in; `status` checks for it.
 2. **The memory-check bypass is never installed, and is removed on setup.**
    `prepare` calls `remove_memory_check_bypass`, which deletes the old
-   `systemd-logind.service.d/hibernado-override.conf` if present. A memory-starved
-   hibernate is now *refused* (stays safely suspended) instead of crashing the GPU.
+   `systemd-logind.service.d/hibernado-override.conf` if present. This restores
+   systemd's *userspace* pre-hibernate check (image size vs swap). Note this does
+   **not** cover a memory-starved GPU eviction inside the kernel freeze phase —
+   see §9.
 3. **`HibernateOnACPower=no`** is written into the drop-in: the hibernate timer
    only counts down on battery, matching SteamOS's own default.
 4. **Legacy migration.** `migrate_legacy_sleep_conf` removes an old
@@ -446,3 +448,97 @@ exact working state, and `cleanup`/uninstall removes the drop-in too.
   systemd's memory check active.
 - **Pick the real-world delay** (code default is `60min`; the `30s` used during
   debugging was only a test value). Adjust via the plugin's delay control.
+
+---
+
+## 9. Second incident: amdgpu VRAM-eviction ENOMEM under heavy game load
+
+**Symptom (2026-07-08, ~10:27):** Playing *No Man's Sky*, triggered
+suspend-then-hibernate. It suspended fine (white pulse), woke ~1 min later to
+hibernate, then hung — required a force power-off. `journalctl -b 0` showed
+nothing because a force-off starts a *new* boot; the evidence was in `-b -1`.
+
+### The kernel sequence (boot `-1`)
+
+```
+10:25:59  Performing sleep operation 'suspend'... → PM: suspend entry (s2idle)   # slept OK
+10:27:01  ...returned from sleep → Performing sleep operation 'hibernate'        # woke, tried to hibernate
+10:27:11  PM: hibernation: Allocated 7804360 kbytes in 7.95 seconds              # snapshot buffer (slow = pressure)
+10:27:11  amdgpu: evicting device resources failed
+10:27:11  amdgpu ... pci_pm_freeze(): amdgpu_pmops_freeze returns -12            # -12 = ENOMEM
+10:27:11  amdgpu ... PM: failed to freeze async: error -12
+10:27:13  systemd-sleep: Failed to put system to sleep... Cannot allocate memory
+10:27:13  systemd-sleep: Couldn't hibernate, will try to suspend again.
+10:27:13  Performing sleep operation 'suspend'...                                # LAST LINE — hung here
+```
+
+There is **no** `PM: suspend entry (s2idle)` after that final line — the fallback
+suspend never started, i.e. the hang was immediate.
+
+### Root cause
+
+To hibernate, `amdgpu` must **evict GPU buffers out of VRAM into system RAM** so
+they are captured in the snapshot. On this **UMA APU (Lenovo Legion Go 2, 20 GB
+shared RAM)** the game's RAM + its GPU-pinned VRAM + the ~7.6 GB snapshot buffer
+exceeded available RAM, so the eviction allocation failed with `ENOMEM (-12)`.
+The kernel unwound and tried to fall back to plain suspend, but the failed GPU
+*freeze* left `amdgpu` in an inconsistent state, so the fallback suspend hung the
+machine. No panic → `pstore`/`coredump` empty (expected for a hard hang).
+
+### Why the §8 bypass-removal didn't prevent it
+
+systemd's pre-hibernate check (which the bypass had disabled) only compares
+**image size vs swap size** — and there was 29 GB of swap, so it passed. The
+failure is **inside the kernel device-freeze phase**, which no userspace check
+can foresee. So bypass-removal helps the "not enough swap" case but is orthogonal
+to this GPU-eviction ENOMEM.
+
+### Contributing configuration
+
+- **`HibernateDelaySec=1min`, `HibernateOnACPower=yes`** (set low for testing):
+  the most aggressive setting — it attempts hibernate 60 s into every sleep,
+  even on AC, maximising the chance of hitting eviction ENOMEM with a game loaded.
+- **zram swap active at priority 100** (9.5 GB) ahead of the disk swapfile: under
+  a heavy game it fills with compressed anon pages that consume real RAM,
+  competing with the GPU eviction hibernation needs.
+
+### Resolution — it *can* be made reliable (two memory levers)
+
+The initial conclusion ("idle/light-use only") turned out to be too pessimistic.
+The eviction ENOMEM is about **free physical RAM at freeze time**, and two levers
+free enough of it to let the GPU eviction succeed even with *No Man's Sky* loaded:
+
+1. **`echo 0 > /sys/power/image_size`** — tells the kernel to shrink the
+   hibernation image as much as possible, forcing aggressive reclaim *before*
+   snapshotting. This is the dominant lever.
+2. **Disable zram** — removes the compressed anon pages that otherwise sit in RAM
+   (and in the image), freeing more physical RAM for the eviction.
+
+**Verified on 2026-07-08 (~14:44), NMS loaded, both levers active:**
+
+```
+hibernado-set-resume.sh: Setting resume device: 259:8, offset: 81139712
+PM: hibernation: Allocated 762481 pages for snapshot     (~2.9 GB, was ~7.6 GB)
+ACPI: PM: Restoring platform NVS memory
+PM: hibernation: hibernation exit
+Finished System Suspend then Hibernate.                  # clean, no amdgpu -12
+```
+
+The snapshot dropped from **~7.6 GB → ~2.9 GB** (≈4.7 GB more free RAM), which was
+exactly enough headroom for `amdgpu` to evict its buffers. No `-12`, clean resume.
+
+### Encoded in the plugin
+
+- **`image_size=0`** is written by the `ExecStartPre` resume hook
+  (`hibernado-set-resume.sh`) before *every* hibernate — always on, safe, only
+  costs a little extra reclaim time.
+- **Disable zram** is an **opt-in UI toggle**. When on, the plugin writes
+  `/etc/systemd/zram-generator.conf` (`[zram0]` with `zram-size = 0` /
+  `host-memory-limit = 0`, per `zram-generator.conf(5)`: "devices with the final
+  size of 0 will be discarded"), which overrides the SteamOS `/usr/lib` config,
+  and applies it live (`swapoff` + stop the zram units). Toggling off removes the
+  file and re-activates zram without a reboot. `cleanup`/uninstall restores it.
+
+Caveat: disabling zram sacrifices compressed RAM-swap for normal gaming, so it's
+opt-in. A longer delay + `HibernateOnACPower=no` still reduces how often a
+heavy-load hibernate is attempted at all.
